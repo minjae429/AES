@@ -50,7 +50,7 @@ C = np.array([
     [0x03, 0x01, 0x01, 0x02]
 ])
 
-Inverse_C = np.array([
+INV_C = np.array([
     [0x0E, 0x0B, 0x0D, 0x09],
     [0x09, 0x0E, 0x0B, 0x0D],
     [0x0D, 0x09, 0x0E, 0x0B],
@@ -108,9 +108,6 @@ def ShiftRows(state):
 
 
 def MixColumns(state):
-    """
-    상수 행렬 C와 State 행렬을 GF(2^8) 상에서 행렬 곱셈합니다.
-    """
     # 결과를 담아둘 0으로 채워진 빈 4x4 행렬 생성
     temp_state = np.zeros((4, 4), dtype=int)
 
@@ -180,8 +177,6 @@ def aes_encrypt(plaintext, secret_key):
     print("\n=== [10 라운드 (최종) State] ===")
     print_state_hex(state)
 
-    # return state.T.flatten().tobytes()
-    # return state.T.flatten().astype(np.uint8).tobytes()
     return bytes(state.T.flatten().tolist())
 
 def print_state_hex(state, title="State"):
@@ -194,10 +189,64 @@ def print_state_hex(state, title="State"):
         print(" ".join([f"{val:02X}" for val in row]))
     print("=" * 20)
 
+def InvSubBytes(state):
+    for i in range(4):
+        for j in range(4):
+            state[i][j] = INV_SBOX[state[i][j]]
+
+def InvShiftRows(state):
+    state[1] = np.roll(state[1], 1)
+    state[2] = np.roll(state[2], 2)
+    state[3] = np.roll(state[3], 3)
+
+def InvMixColumns(state):
+    temp_state = np.zeros((4, 4), dtype=int)
+
+    # 1. 행렬 곱셈 연산 (3중 for문)
+    for i in range(4):  # 상수 행렬 C의 '행'
+        for j in range(4):  # State 행렬의 '열'
+
+            # 내적(Dot Product) 계산
+            val = 0
+            for k in range(4):
+                # 곱셈은 gfm() 함수 사용, 덧셈은 누적 XOR(^) 사용
+                # 수식: C[i][0]*S[0][j] + C[i][1]*S[1][j] + C[i][2]*S[2][j] + C[i][3]*S[3][j]
+                val ^= gfm(INV_C[i][k], state[k][j])
+
+            # 계산된 결과값을 임시 행렬에 저장
+            temp_state[i][j] = val
+
+    # 2. 계산이 모두 끝난 후 원본 state에 덮어쓰기
+    for i in range(4):
+        for j in range(4):
+            state[i][j] = temp_state[i][j]
+
+
+def aes_decrypt(ciphertext, secret_key):
+    state = np.array(list(ciphertext)).reshape(4, 4).T
+    round_keys = GetRoundKey(secret_key)
+    # 초기 AddRoundKey
+    AddRoundKey(state, round_keys[10])
+
+    # 1~9 round
+    for r in range(9, 0, -1):
+        InvShiftRows(state)
+        InvSubBytes(state)
+        AddRoundKey(state, round_keys[r])
+        InvMixColumns(state)
+
+    InvShiftRows(state)
+    InvSubBytes(state)
+    AddRoundKey(state, round_keys[0])
+    return bytes(state.T.flatten().tolist())
+
+
+
 
 secret_key = b'thisisasecretkey'
 plaintext = b'AESUSESAMATRIXZZ'
 
+#=========================encrypt test=========================
 # 내가 구현한 AES로 encrypt
 my_ciphertext = aes_encrypt(plaintext, secret_key)
 
@@ -209,3 +258,18 @@ print(f"\nMy AES: {my_ciphertext.hex().upper()}")
 print(f"\nLibrary AES: {lib_ciphertext.hex().upper()}")
 
 print("-> Encryption 결과 일치 여부: " + str(my_ciphertext == lib_ciphertext))
+
+
+#=========================decrypt test=========================
+
+my_plaintext = aes_decrypt(my_ciphertext, secret_key)
+
+lib_plaintext = cipher.decrypt(my_ciphertext)
+print(f"\nMy AES: {my_plaintext.hex().upper()}")
+print(f"\nLibrary AES: {lib_plaintext.hex().upper()}")
+
+print("-> Decryption 결과 일치 여부: " + str(my_plaintext == lib_plaintext))
+
+# 바이트 객체를 아스키코드(문자열)로 변환하여 출력
+print(f"\n최종 복호화된 문자열 (My AES) : {my_plaintext.decode('ascii')}")
+print(f"최종 복호화된 문자열 (Library): {lib_plaintext.decode('ascii')}")
